@@ -11,12 +11,13 @@ return new class extends Migration
      */
     public function up(): void
     {
+        // create_payment_provider_logs_table
         Schema::create('payment_provider_logs', function (Blueprint $table) {
-            $table->id();
-            $table->foreignId('payout_id')->constrained()->cascadeOnDelete();
+            $table->uuid('id')->primary();
+            $table->foreignUuid('payout_id')->constrained()->cascadeOnDelete();
             $table->json('request_payload');
             $table->json('response_payload')->nullable();
-            $table->enum('outcome', ['success', 'failure', 'timeout']);
+            $table->unsignedTinyInteger('outcome'); // ProviderOutcome
             $table->timestamps();
 
             $table->index('payout_id');
