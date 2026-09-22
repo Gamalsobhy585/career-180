@@ -11,13 +11,13 @@ return new class extends Migration
      */
     public function up(): void
     {
+        // create_payout_items_table
         Schema::create('payout_items', function (Blueprint $table) {
-            $table->id();
-            $table->foreignId('payout_id')->constrained()->cascadeOnDelete();
-            $table->foreignId('instructor_earning_id')->constrained()->cascadeOnDelete();
+            $table->uuid('id')->primary();
+            $table->foreignUuid('payout_id')->constrained()->cascadeOnDelete();
+            $table->foreignUuid('instructor_earning_id')->constrained()->cascadeOnDelete();
             $table->timestamps();
 
-            // an earning can only ever be claimed by one payout
             $table->unique('instructor_earning_id');
         });
     }

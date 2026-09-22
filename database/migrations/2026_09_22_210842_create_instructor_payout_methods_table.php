@@ -12,9 +12,9 @@ return new class extends Migration
     public function up(): void
     {
         Schema::create('instructor_payout_methods', function (Blueprint $table) {
-            $table->id();
-            $table->foreignId('instructor_id')->constrained()->cascadeOnDelete();
-            $table->enum('type', ['bank', 'mock_wallet']);
+            $table->uuid('id')->primary();
+            $table->foreignUuid('instructor_id')->constrained()->cascadeOnDelete();
+            $table->unsignedTinyInteger('type'); // PayoutMethodType
             $table->string('account_identifier'); // IBAN, wallet id, etc. (mocked)
             $table->boolean('is_default')->default(false);
             $table->timestamps();

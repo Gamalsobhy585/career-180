@@ -12,13 +12,13 @@ return new class extends Migration
     public function up(): void
     {
         Schema::create('subscriptions', function (Blueprint $table) {
-            $table->id();
-            $table->foreignId('student_id')->constrained()->cascadeOnDelete();
-            $table->enum('plan', ['monthly', 'quarterly', 'annual']);
-            $table->unsignedBigInteger('amount_paid_cents'); // store money as integer cents
+            $table->uuid('id')->primary();
+            $table->foreignUuid('student_id')->constrained()->cascadeOnDelete();
+            $table->unsignedTinyInteger('plan'); // SubscriptionPlan
+            $table->unsignedBigInteger('amount_paid_cents');
             $table->date('starts_at');
             $table->date('ends_at');
-            $table->enum('status', ['active', 'refunded', 'cancelled'])->default('active');
+            $table->unsignedTinyInteger('status')->default(1); // SubscriptionStatus
             $table->timestamps();
 
             $table->index(['status', 'ends_at']);

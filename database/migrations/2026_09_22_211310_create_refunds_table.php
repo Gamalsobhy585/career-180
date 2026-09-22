@@ -11,9 +11,10 @@ return new class extends Migration
      */
     public function up(): void
     {
+        // create_refunds_table
         Schema::create('refunds', function (Blueprint $table) {
-            $table->id();
-            $table->foreignId('subscription_id')->constrained()->cascadeOnDelete();
+            $table->uuid('id')->primary();
+            $table->foreignUuid('subscription_id')->constrained()->cascadeOnDelete();
             $table->unsignedBigInteger('amount_cents');
             $table->string('reason')->nullable();
             $table->timestamp('refunded_at');

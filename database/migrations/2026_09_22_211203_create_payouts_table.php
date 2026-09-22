@@ -11,15 +11,15 @@ return new class extends Migration
      */
     public function up(): void
     {
+        // create_payouts_table
         Schema::create('payouts', function (Blueprint $table) {
-            $table->id();
-            $table->foreignId('instructor_id')->constrained()->cascadeOnDelete();
-            $table->foreignId('payout_method_id')->nullable()
+            $table->uuid('id')->primary();
+            $table->foreignUuid('instructor_id')->constrained()->cascadeOnDelete();
+            $table->foreignUuid('payout_method_id')->nullable()
                 ->constrained('instructor_payout_methods')->nullOnDelete();
             $table->unsignedBigInteger('amount_cents');
-            $table->string('idempotency_key')->unique(); // core double-payment guard
-            $table->enum('status', ['pending', 'processing', 'succeeded', 'failed', 'unknown'])
-                ->default('pending');
+            $table->string('idempotency_key')->unique();
+            $table->unsignedTinyInteger('status')->default(1); // PayoutStatus
             $table->string('provider_reference')->nullable();
             $table->timestamp('attempted_at')->nullable();
             $table->timestamp('confirmed_at')->nullable();

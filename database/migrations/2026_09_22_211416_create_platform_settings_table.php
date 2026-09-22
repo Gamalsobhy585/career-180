@@ -11,8 +11,9 @@ return new class extends Migration
      */
     public function up(): void
     {
+        // create_platform_settings_table
         Schema::create('platform_settings', function (Blueprint $table) {
-            $table->id();
+            $table->uuid('id')->primary();
             $table->string('key')->unique();
             $table->string('value');
             $table->timestamps();

@@ -12,8 +12,8 @@ return new class extends Migration
     public function up(): void
     {
         Schema::create('instructor_balances', function (Blueprint $table) {
-            $table->id();
-            $table->foreignId('instructor_id')->constrained()->cascadeOnDelete()->unique();
+            $table->uuid('id')->primary();
+            $table->foreignUuid('instructor_id')->constrained()->cascadeOnDelete()->unique();
             $table->unsignedBigInteger('total_earned_cents')->default(0);
             $table->unsignedBigInteger('total_paid_cents')->default(0);
             $table->unsignedBigInteger('total_outstanding_cents')->default(0);
