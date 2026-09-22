@@ -5,13 +5,14 @@ namespace App\Models;
 use App\Http\Enums\PayoutStatus;
 use App\Models\PayoutItem;
 use Illuminate\Database\Eloquent\Concerns\HasUuids;
+use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class Payout extends Model
 {
-    use HasUuids;
+    use HasFactory, HasUuids;
 
     protected $fillable = [
         'instructor_id', 'payout_method_id', 'amount_cents',

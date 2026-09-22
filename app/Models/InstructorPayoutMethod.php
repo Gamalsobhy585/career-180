@@ -4,12 +4,13 @@ namespace App\Models;
 
 use App\Http\Enums\PayoutMethodType;
 use Illuminate\Database\Eloquent\Concerns\HasUuids;
+use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 class InstructorPayoutMethod extends Model
 {
-    use HasUuids;
+    use HasFactory, HasUuids;
 
     protected $fillable = ['instructor_id', 'type', 'account_identifier', 'is_default'];
 
