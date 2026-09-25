@@ -31,12 +31,15 @@ class Subscription extends Model
     {
         return $this->belongsTo(Student::class);
     }
-
     public function courses(): BelongsToMany
     {
-        return $this->belongsToMany(Course::class);
+        return $this->belongsToMany(
+            Course::class,
+            'subscription_course',
+            'subscription_id',
+            'course_id'
+        );
     }
-
     public function earnings(): HasMany
     {
         return $this->hasMany(InstructorEarning::class);

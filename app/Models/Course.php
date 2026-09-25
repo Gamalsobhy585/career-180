@@ -19,8 +19,13 @@ class Course extends Model
         return $this->belongsTo(Instructor::class);
     }
 
-    public function subscriptions(): BelongsToMany
+    public function subscriptions()
     {
-        return $this->belongsToMany(Subscription::class);
+        return $this->belongsToMany(
+            Subscription::class,
+            'subscription_course',
+            'course_id',
+            'subscription_id'
+        );
     }
 }
