@@ -52,6 +52,14 @@ return [
 
     'channels' => [
 
+
+        'payouts' => [
+            'driver' => 'daily',
+            'path' => storage_path('logs/payoutlogs/payouts.log'),
+            'level' => env('LOG_LEVEL', 'debug'),
+            'days' => 30,
+            'replace_placeholders' => true,
+        ],
         'stack' => [
             'driver' => 'stack',
             'channels' => explode(',', env('LOG_STACK', 'single')),
