@@ -11,6 +11,7 @@ use App\Models\PlatformSetting;
 use App\Models\Student;
 use App\Models\Subscription;
 use Illuminate\Database\Seeder;
+use App\Events\SubscriptionCreated;
 
 class DatabaseSeeder extends Seeder
 {
@@ -49,6 +50,7 @@ class DatabaseSeeder extends Seeder
 
                 $courses = $allCourses->random(fake()->numberBetween(2, 5));
                 $subscription->courses()->attach($courses->pluck('id'));
+                event(new SubscriptionCreated($subscription->fresh())); 
             }
         });
     }

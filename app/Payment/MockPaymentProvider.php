@@ -2,54 +2,40 @@
 namespace App\Payment;
 
 use App\Http\Enums\ProviderOutcome;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Str;
 
 class MockPaymentProvider implements PaymentProviderInterface
 {
-    /**
-     * In-memory store simulating the provider's own record of what
-     * actually happened — this is what checkStatus() consults, so a
-     * "timeout" response here can later resolve to "it actually succeeded".
-     */
-    protected static array $providerLedger = [];
+    protected function cacheKey(string $idempotencyKey): string
+    {
+        return "mock_provider_ledger:{$idempotencyKey}";
+    }
 
     public function pay(string $idempotencyKey, int $amountCents): PaymentResult
     {
-       
-        if (isset(static::$providerLedger[$idempotencyKey])) {
-            return static::$providerLedger[$idempotencyKey];
+        $cached = Cache::get($this->cacheKey($idempotencyKey));
+        if ($cached) {
+            return unserialize($cached);
         }
 
         $roll = random_int(1, 100);
 
         $result = match (true) {
-            $roll <= 70 => new PaymentResult(
-                ProviderOutcome::Success,
-                'mock_ref_' . Str::random(12),
-            ),
-            $roll <= 85 => new PaymentResult(
-                ProviderOutcome::Failure,
-                null,
-                'Insufficient provider balance (simulated).',
-            ),
+            $roll <= 70 => new PaymentResult(ProviderOutcome::Success, 'mock_ref_' . Str::random(12)),
+            $roll <= 85 => new PaymentResult(ProviderOutcome::Failure, null, 'Insufficient provider balance (simulated).'),
             default => (function () use ($idempotencyKey) {
-                // Timeout: the provider actually completed the transfer
-                // behind the scenes, but the caller never got the response.
-                // We record the "true" outcome for checkStatus() to reveal
-                // later, but return Timeout to the caller right now.
-                static::$providerLedger[$idempotencyKey] = new PaymentResult(
-                    ProviderOutcome::Success,
-                    'mock_ref_' . Str::random(12),
+                Cache::put(
+                    $this->cacheKey($idempotencyKey),
+                    serialize(new PaymentResult(ProviderOutcome::Success, 'mock_ref_' . Str::random(12))),
+                    now()->addDay()
                 );
-
                 return new PaymentResult(ProviderOutcome::Timeout);
             })(),
         };
 
-        // Only cache success/failure immediately; timeout's true result
-        // was already cached above inside the closure.
         if ($result->outcome !== ProviderOutcome::Timeout) {
-            static::$providerLedger[$idempotencyKey] = $result;
+            Cache::put($this->cacheKey($idempotencyKey), serialize($result), now()->addDay());
         }
 
         return $result;
@@ -57,7 +43,8 @@ class MockPaymentProvider implements PaymentProviderInterface
 
     public function checkStatus(string $idempotencyKey): PaymentResult
     {
-        return static::$providerLedger[$idempotencyKey]
-            ?? new PaymentResult(ProviderOutcome::NotFound);
+        $cached = Cache::get($this->cacheKey($idempotencyKey));
+
+        return $cached ? unserialize($cached) : new PaymentResult(ProviderOutcome::NotFound);
     }
 }
