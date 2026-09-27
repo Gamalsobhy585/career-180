@@ -26,8 +26,8 @@ concurrent execution, refunds, and unreliable payment providers.
 - Redis
 - Laravel Horizon
 - Laravel Sail / Docker
-- Filament 4
-- PHPUnit
+- Filament 3
+- Pest
 
 ## Architecture
 
@@ -39,7 +39,7 @@ See [Architecture Documentation](docs/ARCHITECTURE.md).
 ## Quick Start
 
 ```bash
-git clone <repository-url> career-180
+git clone [<repository-url> career-180](https://github.com/Gamalsobhy585/career-180.git)
 cd career-180
 
 composer install
