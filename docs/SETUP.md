@@ -13,7 +13,7 @@ Docker Desktop must be running before Laravel Sail is started.
 ## 1. Clone the Repository
 
 ```bash
-git clone <repository-url> career-180
+git clone [<repository-url> career-180](https://github.com/Gamalsobhy585/career-180.git)
 cd career-180
 ```
 
