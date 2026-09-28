@@ -19,6 +19,7 @@ use Illuminate\Queue\InteractsWithQueue;
 use Illuminate\Queue\SerializesModels;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Str;
 use Throwable;
 
 class PayInstructorJob implements ShouldQueue
@@ -35,68 +36,90 @@ class PayInstructorJob implements ShouldQueue
     {
         $instructor = Instructor::findOrFail($this->instructorId);
 
-        $earnings = DB::transaction(function () use ($instructor) {
-            return InstructorEarning::where('instructor_id', $instructor->id)
+        // Step 1: reserve earnings + create payout atomically (before any provider call).
+        $payout = $this->reservePayout($instructor);
+
+        if (! $payout) {
+            return;
+        }
+
+        // Step 2: call the provider outside the reservation transaction.
+        $this->attemptPayment($payout, $provider);
+    }
+
+    /**
+     * Creates the payout AND attaches the earnings (payout_items) inside ONE transaction.
+     * Locking the instructor row serializes every worker for this instructor, so a second
+     * worker can only run after the first has committed its reservation.
+     */
+    protected function reservePayout(Instructor $instructor): ?Payout
+    {
+        return DB::transaction(function () use ($instructor) {
+            Instructor::whereKey($instructor->id)->lockForUpdate()->first();
+
+            // A payout that was reserved but never attempted (e.g. worker crashed): resume it.
+            $resumable = Payout::where('instructor_id', $instructor->id)
+                ->where('status', PayoutStatus::Pending)
+                ->oldest()
+                ->lockForUpdate()
+                ->first();
+
+            if ($resumable) {
+                return $resumable;
+            }
+
+            $earnings = InstructorEarning::where('instructor_id', $instructor->id)
                 ->where('status', EarningStatus::Pending)
                 ->whereDoesntHave('payoutItem')
                 ->lockForUpdate()
                 ->get();
-        });
 
-        if ($earnings->isEmpty()) {
-            return;
-        }
+            if ($earnings->isEmpty()) {
+                return null;
+            }
 
-        $totalAmount = $earnings->sum('amount_cents');
-
-        $idempotencyKey = $this->buildIdempotencyKey(
-            $instructor->id,
-            $earnings
-        );
-
-        $payout = Payout::firstOrCreate(
-            [
-                'idempotency_key' => $idempotencyKey,
-            ],
-            [
+            $payout = Payout::create([
                 'instructor_id' => $instructor->id,
-                'payout_method_id' => optional(
-                    $instructor->defaultPayoutMethod
-                )->id,
-                'amount_cents' => $totalAmount,
+                'payout_method_id' => optional($instructor->defaultPayoutMethod)->id,
+                'amount_cents' => $earnings->sum('amount_cents'),
                 'status' => PayoutStatus::Pending,
-            ]
-        );
+                'idempotency_key' => $this->buildIdempotencyKey($instructor->id, $earnings),
+            ]);
 
-        if (
-            in_array(
-                $payout->status,
-                [
-                    PayoutStatus::Succeeded,
-                    PayoutStatus::Processing,
-                ],
-                true
-            )
-        ) {
-            return;
-        }
+            foreach ($earnings as $earning) {
+                PayoutItem::create([
+                    'payout_id' => $payout->id,
+                    'instructor_earning_id' => $earning->id,
+                ]);
+            }
 
-        $this->attemptPayment(
-            $payout,
-            $earnings,
-            $provider
-        );
+            return $payout;
+        });
     }
 
     protected function attemptPayment(
         Payout $payout,
-        $earnings,
         PaymentProviderInterface $provider
     ): void {
-        $payout->update([
-            'status' => PayoutStatus::Processing,
-            'attempted_at' => now(),
-        ]);
+        // Claim: only one worker can move the payout Pending -> Processing.
+        $payout = DB::transaction(function () use ($payout) {
+            $locked = Payout::whereKey($payout->id)->lockForUpdate()->first();
+
+            if (! $locked || $locked->status !== PayoutStatus::Pending) {
+                return null;
+            }
+
+            $locked->update([
+                'status' => PayoutStatus::Processing,
+                'attempted_at' => now(),
+            ]);
+
+            return $locked;
+        });
+
+        if (! $payout) {
+            return;
+        }
 
         try {
             $result = $provider->pay(
@@ -122,9 +145,8 @@ class PayInstructorJob implements ShouldQueue
             ]);
 
             match ($result->outcome) {
-                ProviderOutcome::Success => $this->markSucceeded(
-                    $payout,
-                    $earnings,
+                ProviderOutcome::Success => self::finalizePayout(
+                    $payout->id,
                     $result->providerReference
                 ),
 
@@ -140,6 +162,11 @@ class PayInstructorJob implements ShouldQueue
                 ),
             };
         } catch (Throwable $exception) {
+            // We can't be sure what happened at the provider: let reconciliation decide.
+            Payout::whereKey($payout->id)
+                ->where('status', PayoutStatus::Processing)
+                ->update(['status' => PayoutStatus::Unknown]);
+
             Log::channel('payouts')->error(
                 'Instructor payout provider call failed.',
                 [
@@ -158,9 +185,7 @@ class PayInstructorJob implements ShouldQueue
 
     protected function markFailed(Payout $payout, $result): void
     {
-        $payout->update([
-            'status' => PayoutStatus::Failed,
-        ]);
+        self::releaseFailedPayout($payout->id);
 
         Log::channel('payouts')->error(
             'Instructor payout failed.',
@@ -196,65 +221,76 @@ class PayInstructorJob implements ShouldQueue
         );
     }
 
-    protected function markSucceeded(
-        Payout $payout,
-        $earnings,
-        ?string $reference
-    ): void {
-        DB::transaction(function () use (
-            $payout,
-            $earnings,
-            $reference
-        ) {
+    /**
+     * Idempotent + concurrency-safe success handling. Shared with ReconcilePendingPayoutsJob.
+     * The payout row lock guarantees that only the first caller applies the success;
+     * everyone else waits, sees Succeeded, and returns.
+     */
+    public static function finalizePayout(int|string $payoutId, ?string $reference): void
+    {
+        DB::transaction(function () use ($payoutId, $reference) {
+            $payout = Payout::whereKey($payoutId)->lockForUpdate()->firstOrFail();
+
+            if ($payout->status === PayoutStatus::Succeeded) {
+                return;
+            }
+
             $payout->update([
                 'status' => PayoutStatus::Succeeded,
                 'provider_reference' => $reference,
                 'confirmed_at' => now(),
             ]);
 
-            foreach ($earnings as $earning) {
-                PayoutItem::firstOrCreate([
-                    'payout_id' => $payout->id,
-                    'instructor_earning_id' => $earning->id,
-                ]);
+            // Immutable snapshot: only the earnings reserved for THIS payout.
+            $earningIds = PayoutItem::where('payout_id', $payout->id)
+                ->pluck('instructor_earning_id');
 
-                $earning->update([
-                    'status' => EarningStatus::Paid,
-                ]);
+            $earnings = InstructorEarning::whereIn('id', $earningIds)
+                ->where('status', EarningStatus::Pending)
+                ->lockForUpdate()
+                ->get();
+
+            foreach ($earnings as $earning) {
+                $earning->update(['status' => EarningStatus::Paid]);
             }
 
-            $balance = InstructorBalance::where(
-                'instructor_id',
-                $payout->instructor_id
-            )->first();
+            $balance = InstructorBalance::where('instructor_id', $payout->instructor_id)
+                ->lockForUpdate()
+                ->first();
 
             if ($balance) {
-                $balance->decrement(
-                    'total_outstanding_cents',
-                    $payout->amount_cents
-                );
-
-                $balance->increment(
-                    'total_paid_cents',
-                    $payout->amount_cents
-                );
+                $balance->decrement('total_outstanding_cents', $payout->amount_cents);
+                $balance->increment('total_paid_cents', $payout->amount_cents);
             }
         });
     }
 
-    protected function buildIdempotencyKey(
-        string $instructorId,
-        $earnings
-    ): string {
-        $earningIds = $earnings
-            ->pluck('id')
-            ->sort()
-            ->implode(',');
+    /**
+     * Definitive provider failure: release the reserved earnings so a later run
+     * can pay them in a new payout.
+     */
+    public static function releaseFailedPayout(int|string $payoutId): void
+    {
+        DB::transaction(function () use ($payoutId) {
+            $payout = Payout::whereKey($payoutId)->lockForUpdate()->firstOrFail();
 
-        return hash(
-            'sha256',
-            $instructorId . '|' . $earningIds
-        );
+            if (in_array($payout->status, [PayoutStatus::Succeeded, PayoutStatus::Failed], true)) {
+                return;
+            }
+
+            PayoutItem::where('payout_id', $payout->id)->delete();
+
+            $payout->update(['status' => PayoutStatus::Failed]);
+        });
+    }
+
+    protected function buildIdempotencyKey(string $instructorId, $earnings): string
+    {
+        $earningIds = $earnings->pluck('id')->sort()->implode(',');
+
+        // The UUID makes each reservation unique, so a released (failed) payout
+        // can be retried with a fresh key. Idempotency comes from the reservation itself.
+        return hash('sha256', $instructorId . '|' . $earningIds . '|' . Str::uuid());
     }
 
     /**
